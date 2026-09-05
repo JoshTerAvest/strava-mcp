@@ -7,13 +7,17 @@
 
 Turn Claude (or any MCP-compatible AI) into your personal running and cycling coach. 
 
+![Claude analyzing a run with Pandas](assets/screenshot.png)
+
+*Example of Claude using Pandas to analyze a marathon\'s Cardiac Drift.*
+
 While most Strava integrations just fetch a basic list of your recent workouts, this server is built from the ground up for **Deep Analytics**. Powered by Python and `pandas`, it gives your AI agent the ability to analyze your heart rate zones (for running, cycling, and swimming), track your shoe mileage, detect your macro-training phases (Build vs. Taper), and even identify mid-run fatigue.
 
 ## 🛑️ Why no OAuth or Webhooks? (The Local Advantage)
 
 This server is intentionally designed as a **Local Edge-Compute MCP**. Unlike other Strava MCPs that force you to deploy a Cloudflare Worker and route your private health data through a third-party server, this runs entirely on your own machine. By keeping it local and using a simple `.env` file, we eliminate cloud hosting complexity, ensure your data never leaves your device, and allow the server to directly leverage Python's powerful `pandas` library (which cannot run on V8 isolates like Cloudflare).
 
-## ✈ Why use this one?
+## ✂ Why use this one?
 
 - **Multi-Sport, Python & Pandas Native:** Written in Python using `fastmcp`. It's incredibly easy to fork and extend if you want to pipe your running/cycling data into custom data science models or generate `matplotlib` graphs.
 - **Deep Time-Series Streams:** Instead of just average pace, it exposes raw, second-by-second heart rate and altitude arrays so Claude can analyze exactly when you peaked on a hill.
@@ -36,15 +40,69 @@ This server is intentionally designed as a **Local Edge-Compute MCP**. Unlike ot
 - `get_athlete_stats` - All-time and recent totals.
 - `get_gear_stats` - Shoe mileage tracker to proactively warn you when it's time for new shoes.
 
-## 🚠 Quickstart
+## 🚀 Getting Started
 
-1. Create a Strava API app at https://www.strava.com/settings/api
-2. Authorize it and ensure you have the scopes: `read_all,activity:read_all,profile:read_all`
-3. Clone this repository and create a `.env` file:
+### 1. Get your Strava API Credentials
+1. Go to your [Strava API Settings](https://www.strava.com/settings/api).
+2. Create an application. Set the **Authorization Callback Domain** to `localhost`.
+3. Note your **Client ID** and **Client Secret**.
+
+### 2. Generate a Refresh Token
+Since this is a local edge-compute MCP, you need to generate your own refresh token once. The server will handle auto-refreshing it from then on.
+1. Paste this URL into your browser (replace `YOUR_CLIENT_ID` with your actual ID):
    ```text
-   STRAVA_CLIENT_ID=your_client_id
-   STRAVA_CLIENT_SECRET=your_client_secret
-   STRAVA_REFRESH_TOKEN=your_refresh_token
+   https://www.strava.com/oauth/authorize?client_id=YOUR_CLIENT_ID&response_type=code&redirect_uri=http://localhost&scope=read_all,activity:read_all,profile:read_all
    ```
-4. Install dependencies: `uv sync`
-5. Add it to Claude Code: `claude mcp add strava -- uv run server.py`
+2. Click "Authorize". You will be redirected to a broken `localhost` page. This is completely normal!
+3. Look at the URL bar and copy the `code=...` value.
+4. Exchange that code for a refresh token by running this in your terminal:
+   ```bash
+   curl -X POST https://www.strava.com/oauth/token \
+     -d client_id=YOUR_CLIENT_ID \
+     -d client_secret=YOUR_CLIENT_SECRET \
+     -d code=THE_CODE_YOU_COPIED \
+     -d grant_type=authorization_code
+   ```
+5. Copy the `refresh_token` from the JSON response.
+
+### 3. Installation
+
+```bash
+git clone https://github.com/JoshTerAvest/strava-mcp.git
+cd strava-mcp
+
+# Create your .env file and paste your credentials
+echo "STRAVA_CLIENT_ID=your_id" > .env
+echo "STRAVA_CLIENT_SECRET=your_secret" >> .env
+echo "STRAVA_REFRESH_TOKEN=your_token" >> .env
+
+# Install dependencies
+uv sync
+```
+
+### 4. Connect to Claude Desktop
+The easiest way to install is using the Claude CLI:
+```bash
+claude mcp add strava --uv run server.py
+```
+
+Alternatively, manually add it to your `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "strava": {
+      "command": "uv",
+      "args": [
+        "run",
+        "/absolute/path/to/strava-mcp/server.py"
+      ]
+    }
+  }
+}
+```
+
+### 5. Try it out!
+Ask Claude:
+> *"Run `get_daily_briefing` to check my training load."*
+> *"Analyze my latest long run and calculate my Cardiac Drift."*
+> *"Check my shoe mileage and tell me if I need a new pair."*
