@@ -88,7 +88,7 @@ def get_recent_activities(count: int = 10) -> str:
             f"{a['name']} | "
             f"{_format_distance(a['distance'])} | "
             f"{_format_time(a['moving_time'])} | "
-            f"Pace {_format_pace(a['distance'], a['moving_time'])}"
+            f"Pace {_format_pace(a['distance'], a['moving_time'], a.get('type', 'Run'))}"
             f"{hr_str} | "
             f"{a['type']} | ID: {a['id']}"
         )
@@ -164,7 +164,7 @@ def get_activity_details(activity_id: int) -> str:
         f"Distance: {_format_distance(a['distance'])}",
         f"Moving Time: {_format_time(a['moving_time'])}",
         f"Elapsed Time: {_format_time(a['elapsed_time'])}",
-        f"Pace: {_format_pace(a['distance'], a['moving_time'])}",
+        f"Pace: {_format_pace(a['distance'], a['moving_time'], a.get('type', 'Run'))}",
         f"Elevation Gain: {a.get('total_elevation_gain', 0):.0f} m ({a.get('total_elevation_gain', 0) * 3.281:.0f} ft)",
         f"Calories: {a.get('calories', 'N/A')}",
     ]
@@ -183,7 +183,9 @@ def get_activity_details(activity_id: int) -> str:
     if splits:
         lines.append("\nMile Splits:")
         for i, s in enumerate(splits, 1):
-            split_pace = _format_pace(s["distance"], s["moving_time"])
+            split_pace = _format_pace(
+                s["distance"], s["moving_time"], a.get("type", "Run")
+            )
             hr = (
                 f" | HR {s['average_heartrate']:.0f}"
                 if s.get("average_heartrate")
@@ -255,14 +257,14 @@ def get_athlete_stats() -> str:
 
 
 @mcp.tool
-def get_weekly_summary(weeks_back: int = 4) -> str:
+def get_weekly_summary(weeks_back: int = 4, activity_type: str = "Run") -> str:
     """Get weekly mileage, run count, and average pace for recent weeks."""
     cutoff = datetime.now(timezone.utc) - timedelta(weeks=weeks_back)
     epoch = int(cutoff.timestamp())
     activities = client.get_activities(per_page=100, after=epoch)
-    runs = [a for a in activities if a["type"] == "Run"]
+    runs = [a for a in activities if a["type"].lower() == activity_type.lower()]
     if not runs:
-        return f"No runs in the last {weeks_back} weeks."
+        return f"No {activity_type}s in the last {weeks_back} weeks."
 
     weeks = {}
     for r in runs:
@@ -275,9 +277,9 @@ def get_weekly_summary(weeks_back: int = 4) -> str:
         weeks[week_key]["distance"] += r["distance"]
         weeks[week_key]["time"] += r["moving_time"]
 
-    lines = [f"Weekly running summary (last {weeks_back} weeks):\n"]
+    lines = [f"Weekly {activity_type} summary (last {weeks_back} weeks):\n"]
     for week, data in sorted(weeks.items(), reverse=True):
-        pace = _format_pace(data["distance"], data["time"])
+        pace = _format_pace(data["distance"], data["time"], activity_type)
         lines.append(
             f"Week of {week}: {data['count']} runs, "
             f"{_format_distance(data['distance'])}, "
@@ -360,9 +362,10 @@ def analyze_activity_zones_pandas(activity_id: int) -> str:
         # Pace in seconds per mile: 60 seconds / (dist_diff / 1609.34)
         df["rolling_pace_sec_per_mi"] = 60 / (df["dist_diff"] / 1609.34)
         best_rolling_pace = df["rolling_pace_sec_per_mi"].min()
+        act = client.get_activity(activity_id)
         if pd.notna(best_rolling_pace) and best_rolling_pace > 0:
             lines.append(
-                f"Best 1-Minute Rolling Pace: {_format_pace(1609.34, best_rolling_pace)}"
+                f"Best 1-Minute Rolling Pace: {_format_pace(1609.34, best_rolling_pace, act.get('type', 'Run'))}"
             )
 
     if "hr" in df.columns and "distance" in df.columns and len(df) > 120:
@@ -406,7 +409,7 @@ def analyze_activity_zones_pandas(activity_id: int) -> str:
 
 
 @mcp.tool
-def get_daily_briefing() -> str:
+def get_daily_briefing(activity_type: str = "Run") -> str:
     """Get a daily Strava briefing (yesterday's workouts, today's workouts, and week-to-date mileage) for ambient agent routines."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=14)
     activities = client.get_activities(per_page=50, after=int(cutoff.timestamp()))
@@ -442,23 +445,29 @@ def get_daily_briefing() -> str:
 
     # Weekly progress (Monday to Sunday)
     monday = today - timedelta(days=today.weekday())
-    this_week_df = df[(df["date"] >= monday) & (df["type"] == "Run")]
+    this_week_df = df[
+        (df["date"] >= monday) & (df["type"].str.lower() == activity_type.lower())
+    ]
     this_week_dist = this_week_df["distance"].sum() if not this_week_df.empty else 0
 
-    lines.append(f"\n- **Week-to-Date (Run):** {_format_distance(this_week_dist)}")
+    lines.append(
+        f"\n- **Week-to-Date ({activity_type}):** {_format_distance(this_week_dist)}"
+    )
 
     return "\n".join(lines)
 
 
 @mcp.tool
-def get_training_trends() -> str:
+def get_training_trends(activity_type: str = "Run") -> str:
     """Analyzes the last 12 weeks of data to determine if the user is in a build, maintain, or taper phase."""
     cutoff = datetime.now(timezone.utc) - timedelta(weeks=12)
     activities = client.get_activities(per_page=200, after=int(cutoff.timestamp()))
 
-    df = pd.DataFrame([a for a in activities if a["type"] == "Run"])
+    df = pd.DataFrame(
+        [a for a in activities if a["type"].lower() == activity_type.lower()]
+    )
     if df.empty:
-        return "Not enough running data to calculate trends."
+        return f"Not enough {activity_type} data to calculate trends."
 
     df["date"] = pd.to_datetime(df["start_date_local"])
     df.set_index("date", inplace=True)
@@ -489,6 +498,53 @@ def get_training_trends() -> str:
         else:
             lines.append("- **Phase:** 🟡 Maintenance Phase (Steady volume).")
 
+    return "\n".join(lines)
+
+
+@mcp.tool
+def get_starred_segments() -> str:
+    """Get the authenticated athlete's starred segments."""
+    segments = client.get_starred_segments()
+    if not segments:
+        return "No starred segments found."
+    lines = ["Starred Segments:\n"]
+    for s in segments:
+        lines.append(
+            f"- {s['name']} (ID: {s['id']}) | {_format_distance(s['distance'])} | {s.get('city', '')}, {s.get('state', '')}"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool
+def explore_segments(bounds: str, activity_type: str = "running") -> str:
+    """Explore segments in a specific rectangular area. Bounds must be comma separated: sw_lat,sw_lng,ne_lat,ne_lng. activity_type can be 'running' or 'riding'."""
+    try:
+        data = client.explore_segments(bounds, activity_type)
+        segments = data.get("segments", [])
+        if not segments:
+            return "No segments found in this area."
+        lines = [f"Segments found ({activity_type}):\n"]
+        for s in segments:
+            lines.append(
+                f"- {s['name']} (ID: {s['id']}) | Cat: {s.get('climb_category', 0)}"
+            )
+        return "\n".join(lines)
+    except Exception as e:  # noqa: BLE001
+        return f"Error exploring segments: {e!s}"
+
+
+@mcp.tool
+def get_athlete_routes() -> str:
+    """Get the authenticated athlete's saved routes."""
+    athlete = client.get_athlete()
+    routes = client.get_routes(athlete["id"])
+    if not routes:
+        return "No saved routes found."
+    lines = ["Saved Routes:\n"]
+    for r in routes:
+        lines.append(
+            f"- {r['name']} (ID: {r['id']}) | {_format_distance(r['distance'])} | Elev Gain: {r.get('elevation_gain', 0):.0f}m"
+        )
     return "\n".join(lines)
 
 

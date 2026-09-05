@@ -77,3 +77,18 @@ class StravaClient:
 
     def get_gear(self, gear_id):
         return self._get(f"/gear/{gear_id}")
+
+    def get_starred_segments(self):
+        return self._get("/segments/starred")
+
+    def explore_segments(self, bounds, activity_type="running"):
+        return self._get(
+            "/segments/explore",
+            params={"bounds": bounds, "activity_type": activity_type},
+        )
+
+    def get_segment(self, segment_id):
+        return self._get(f"/segments/{segment_id}")
+
+    def get_routes(self, athlete_id):
+        return self._get(f"/athletes/{athlete_id}/routes")
